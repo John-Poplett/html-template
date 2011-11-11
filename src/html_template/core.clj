@@ -66,13 +66,13 @@
 (defn parse-tmpl-var [data]
   (let [result (re-find (re-pattern "^<!--\\s+TMPL_VAR\\s+([a-z][a-z0-9]*)\\s+-->") data)]
     (if result
-      [ [ :tmpl-var (second result) ], (subs data (count (first result))) ]
+      [ [ :tmpl-var (keyword (second result)) ], (subs data (count (first result))) ]
       nil)))
   
 (defn parse-tmpl-loop [data]
   (let [result (re-find (re-pattern "^<!--\\s+TMPL_LOOP\\s+([a-z][a-z0-9]*)\\s+-->") data)]
     (if result
-      [ [ :tmpl-loop (second result) ], (subs data (count (first result))) ]
+      [ [ :tmpl-loop (keyword (second result)) ], (subs data (count (first result))) ]
       nil)))
   
 (defn parse-tmpl-end-loop [data]
@@ -82,8 +82,28 @@
       [ [ :tmpl-end-loop nil ], (subs data (count result)) ]
       nil)))
   
+(defn parse-tmpl-if [data]
+  (let [result (re-find (re-pattern "^<!--\\s+TMPL_IF\\s+([a-z][a-z0-9]*)\\s+-->") data)]
+    (if result
+      [ [ :tmpl-if (keyword (second result)) ], (subs data (count (first result))) ]
+      nil)))
+  
+(defn parse-tmpl-else [data]
+  (let [result (re-find (re-pattern "^<!--\\s+TMPL_ELSE\\s+-->") data)]
+    ;(println parse-tmpl-end-loop ": " data " -> " result)
+    (if result
+      [ [ :tmpl-else nil ], (subs data (count result)) ]
+      nil)))
+  
+(defn parse-tmpl-end-if [data]
+  (let [result (re-find (re-pattern "^<!--\\s+/TMPL_IF\\s+-->") data)]
+    ;(println parse-tmpl-end-loop ": " data " -> " result)
+    (if result
+      [ [ :tmpl-end-if nil ], (subs data (count result)) ]
+      nil)))
+  
 (defn parse-tmpl-directive [data]
-  (loop [directive-parsers [parse-tmpl-var parse-tmpl-loop parse-tmpl-end-loop]]
+  (loop [directive-parsers [parse-tmpl-var parse-tmpl-loop parse-tmpl-end-loop parse-tmpl-if parse-tmpl-else parse-tmpl-end-if]]
     (assert directive-parsers) ; should never run out of parsers
     (let [result ((first directive-parsers) data)]
       (if (nil? result)
@@ -95,10 +115,10 @@
   (loop [result []
          data init-template-data]
     (if (> (count data) 0)
-      (let [[start, finish] (match "<!--\\s+(TMPL_(IF|ELSE|((VAR|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|LOOP))\\s+-->" data)]
+      (let [[start, finish] (match "<!--\\s+(TMPL_(ELSE|((IF|VAR|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|LOOP))\\s+-->" data)]
         ;(println data " " start " " finish)
         (cond (> start 0)    ; collect plain text up to tmpl directive
-              (recur (conj result [ :text (subs data 0 (- start 1)) ])
+              (recur (conj result [ :text (subs data 0 start) ])
                      (subs data start))
               (and (= start 0) (= finish 0)) ; remainder is plain text
               (recur (conj result [ :text data ])
@@ -111,7 +131,15 @@
 
 
 (defn v []
-  (let [tmpl "<html><head><!-- this is foo --></head><body><!-- TMPL_LOOP foo --><!-- TMPL_VAR hello --><!-- /TMPL_LOOP --></body></html>"]
+  (let [tmpl "<html><head><!-- this is foo --></head><body>
+<!-- TMPL_LOOP foo -->
+<!-- TMPL_IF hello -->
+<p><!-- TMPL_VAR hello --></p>
+<!-- TMPL_ELSE -->
+<p>hello world!</p>
+<!-- /TMPL_IF -->
+<!-- /TMPL_LOOP -->
+</body></html>"]
     (parse-tmpl tmpl)))
 
 (defn w []
@@ -123,6 +151,11 @@
 (defn create-context-stack []
   [(struct context [] (gensym) nil)])
 
+(defn create-code-frame [ctx context-symbol]
+  "Like push-context-stack only preserves \"context\" from previous
+stack position."
+  (conj ctx (struct context [] (peek-context ctx) context-symbol)))
+  
 (defn push-context-stack [ctx context-symbol]
   (conj ctx (struct context [] (gensym) context-symbol)))
 
@@ -154,16 +187,36 @@
       (let [[key value] (first tokens)]
         ;(println "compiled-output:" (peek-compiled-output context) "key:" key ", value:" value)
         (cond (= key :text)
-              (recur (push-compiled-output context `(println ~value)) (next tokens))
+              (recur (push-compiled-output context `(print ~value)) (next tokens))
               (= key :tmpl-var)
-              (recur (push-compiled-output context `(get ~(peek-context context) ~(keyword value))) (next tokens))
+              (recur (push-compiled-output context `(print (get ~(peek-context context) ~value))) (next tokens))
+              (= key :tmpl-if)
+              (recur (create-code-frame context value) (next tokens))
+              (= key :tmpl-else)
+              (recur (create-code-frame context :tmpl-else) (next tokens))
+              (= key :tmpl-end-if)
+              (let [context-symbol (peek-context-symbol context)]
+                (cond (= context-symbol :tmpl-else)
+                      (let [if-context (pop context)
+                            compiled-output 
+                            `(if (get ~(peek-context context) ~(peek-context-symbol if-context))
+                               (do
+                                 ~@(peek-compiled-output if-context))
+                               (do
+                                 ~@(peek-compiled-output context)))]
+                        (recur (push-compiled-output (pop-context-stack if-context) compiled-output) (next tokens)))
+                      :else
+                      (let [compiled-output
+                            '(if (get ~(peek-context context) ~(peek-context-symbol context))
+                               (do
+                                 ~@(peek-compiled-output context)))]
+                        (recur (push-compiled-output (pop-context-stack context) compiled-output) (next tokens)))))
               (= key :tmpl-loop)
               (recur (push-context-stack context value) (next tokens))
               (= key :tmpl-end-loop)
-              (let [loop-compiled-output (peek-compiled-output context)
-                    context-symbol (peek-context-symbol context)
-                    compiled-output `(doseq [~(peek-context context) (get ~(peek-previous-context context) ~(keyword (peek-context-symbol context)))]
-                                       ~loop-compiled-output)]
+              (let [context-symbol (peek-context-symbol context)
+                    compiled-output `(doseq [~(peek-context context) (get ~(peek-previous-context context) ~(peek-context-symbol context))]
+                                       ~@(peek-compiled-output context))]
                 (recur (push-compiled-output (pop-context-stack context) compiled-output) (next tokens)))
               :else (recur context (next tokens))))
       `(fn [~(peek-context context)] ~@(peek-compiled-output context)))))
