@@ -1,5 +1,8 @@
 (ns html-template.core
-  (:use name.choi.joshua.fnparse clojure.set clojure.test clojure.pprint))
+  (:use clojure.pprint))
+
+;(ns html-template.core
+ ; (:use clojure.set clojure.test clojure.pprint))
 
 ;; <table border=1>
 ;;   <!-- TMPL_LOOP rows -->
@@ -14,6 +17,24 @@
 ;;     </tr>
 ;;   <!-- /TMPL_LOOP -->
 ;; </table>
+
+(declare parse-tmpl)
+
+(defn sample-parse []
+  (parse-tmpl
+"<table border=1>
+  <!-- TMPL_LOOP rows -->
+    <tr>
+      <!-- TMPL_LOOP cols -->
+        <!-- TMPL_IF colorful-style -->
+          <td align=\"right\" bgcolor=\"pink\"><!-- TMPL_VAR content --></td>
+        <!-- TMPL_ELSE -->
+          <td align=\"right\" ><!-- TMPL_VAR content --></td>
+        <!-- /TMPL_IF -->
+      <!-- /TMPL_LOOP -->
+    </tr>
+  <!-- /TMPL_LOOP -->
+</table>"))
 
 ;; (let* ((rows (loop for i below 49 by 7
 ;;                    collect (list :cols
@@ -83,7 +104,7 @@
       nil)))
   
 (defn parse-tmpl-if [data]
-  (let [result (re-find (re-pattern "^<!--\\s+TMPL_IF\\s+([a-z][a-z0-9]*)\\s+-->") data)]
+  (let [result (re-find (re-pattern "^<!--\\s+TMPL_IF\\s+([a-z][a-z\\-0-9]*)\\s+-->") data)]
     (if result
       [ [ :tmpl-if (keyword (second result)) ], (subs data (count (first result))) ]
       nil)))
@@ -150,6 +171,8 @@
 
 (defn create-context-stack []
   [(struct context [] (gensym) nil)])
+
+(declare peek-context)
 
 (defn create-code-frame [ctx context-symbol]
   "Like push-context-stack only preserves \"context\" from previous
