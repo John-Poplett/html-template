@@ -53,148 +53,6 @@
     (println "</tr>"))
   (println "</table>"))
   
-
-;; push_context
-;; emit
-;; loop
-;; emit
-;; loop
-;; emit_if_else
-;; end_loop
-;; emit
-;; end_loop
-;; pop_context
-
-;(def foo { :rows [[ :cols [ { :content "one" :colorful-style false } { :content "two" :colorful-style true } ]]]})
-
-(defn nb-char-lit [ch]
-  (lit ch))
-
-;(defn- b-char [args]
- ; (args))
-
-(def space (nb-char-lit \space))
-
-(def tab (nb-char-lit \tab))
-
-(def newline-lit (lit \newline))
-
-(def return-lit (lit \return))
-
-; (def line-break (b-char (rep+ (alt newline-lit return-lit))))
-(def line-break (rep+ (alt newline-lit return-lit)))
-
-;(def ws (constant-semantics (rep* (alt space tab line-break)) :ws))
-
-(def ws (rep* (alt space tab line-break)))
-
-(def comment-start (lit-conc-seq "<!--"))
- 
-(def comment-end (lit-conc-seq "-->"))
-
-(defn test-set [& args]
-  (set (mapcat (fn [value]
-                 (cond (sequential? value)
-                        (map char (range (int (first value)) (inc (int (second value)))))
-                        (char? value) [value])) args)))
-
-(def lower-case (term #(contains? (test-set [\a \z]) %)))
-
-(def lower-case-plus-hyphen (term #(contains? (test-set [\a \z] \-) %)))
-
-(def tmpl-identifier (semantics (conc lower-case (rep* lower-case-plus-hyphen)) (fn [result] (apply str (flatten result)))))
-
-;(def tmpl-var
- ; (conc comment-start ws (lit-conc-seq "TMPL_VAR") ws tmpl-identifier ws comment-end))
-
-;(def tmpl-var
- ; (conc comment-start ws (lit-conc-seq "TMPL_VAR") ws tmpl-identifier ws comment-end))
-
-(def tmpl-var
-  (complex [_ comment-start
-            _ ws
-            _ (lit-conc-seq "TMPL_VAR")
-            _ ws
-            identifier tmpl-identifier
-            _ ws
-            _ comment-end]
-           { :tmpl-var identifier }))
-
-(def tmpl-loop-start
-  (complex [_ comment-start
-            _ ws
-            _ (lit-conc-seq "TMPL_LOOP")
-            _ ws
-            identifier tmpl-identifier
-            _ ws
-            _ comment-end]
-           identifier))
- 
-(def tmpl-loop-end (conc comment-start ws (lit-conc-seq "/TMPL_LOOP") ws comment-end))
-
-;(def non-tmpl (except (rep* anything) (conc comment-start ws (lit-conc-seq "TMPL_"))))
-
-;(def non-tmpl (rep* (alt (except anything (lit \<)) (conc (lit \<) (except anything (lit \!))))))
-
-;(def non-tmpl (rep* (alt (except anything (lit \<)) (conc (lit \<) (except anything (lit \!))) (except (conc comment-start ws) (conc comment-start ws (lit-conc-seq "TMPL_"))))))
-
-;; (def non-tmpl (semantics
-;;                (rep* (alt
-;;                       (except anything (lit \<))
-;;                       (conc (lit \<) (except anything (lit \!)))
-;;                       (complex [subproduct (conc comment-start ws), _ (not-followed-by (alt (lit-conc-seq "TMPL_") (lit-conc-seq "/TMPL_")))]
-;;                                subproduct)))
-;;                (fn [result] { :text (apply str (flatten result))})))
-
-(def non-tmpl (semantics
-               (rep* (alt
-                      (except anything (lit \<))
-                      (complex [subproduct (lit \<), _ (not-followed-by (conc (lit-conc-seq "!--") ws (alt (lit-conc-seq "TMPL_") (lit-conc-seq "/TMPL_"))))]
-                               subproduct)))
-               (fn [result] { :text (apply str (flatten result))})))
-
-(declare tmpl-loop)
-
-(defn debug [subrule]
-  (complex [init-state get-state, subproduct subrule, state get-state, _ (effects (println init-state " -> " state))]
-           subproduct))
-
-(defn debug2 [name subrule]
-  (complex [init-state get-state, _ (effects (println name ": " init-state)), subproduct subrule, state get-state, _ (effects (println name ": " state))]
-           subproduct))
-
-(def stmt
-  (alt
-   (debug2 "non-tmpl" non-tmpl)
-   (debug2 "tmpl-var" tmpl-var)
-   (debug2 "tmpl-loop" tmpl-loop)))
-
-(def tmpl-loop
-  (complex [loop-identifier tmpl-loop-start
-             loop-text stmt
-             _ tmpl-loop-end]
-            { :loop loop-identifier :loop-text loop-text}))
-
-(def text
-  (rep* stmt))
-
-(defn t [rule] (rule-match rule prn prn { :remainder "<html><head><!-- this is foo --></head><body><!-- TMPL_LOOP foo --><!-- TMPL_VAR hello --><!-- /TMPL_LOOP --></body></html>" }))
-(defn u [rule] (rule-match rule prn prn { :remainder "<html><head><!-- this is foo --></head><body><!-- TMPL_VAR hello --></body></html>" }))
-  
-(defn ^String substring?
-  "True if s contains the substring."
-  [substring ^String s]
-  (.contains s substring))
-
-(defn transform [stream transforms]
-  stream)
-
-(deftest tmpl-var-test ()
-  (with-in-str "<html><head/><body><!-- TMPL_VAR hello --></body></html>"
-    (is (= (transform *in* { :hello "hello world!" }) "<html><head/><body>hello world!</body></html>"))))
-
-(run-tests)
-
 (defn first-match [m]
   (if (coll? m) (first m) m))
 
@@ -232,9 +90,10 @@
         (recur (rest directive-parsers))
         result))))
 
-(defn parse-tmpl [init-data]
+(defn parse-tmpl [init-template-data]
+  "Parse template data into a tokenized intermediate form."
   (loop [result []
-         data init-data]
+         data init-template-data]
     (if (> (count data) 0)
       (let [[start, finish] (match "<!--\\s+(TMPL_(IF|ELSE|((VAR|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|LOOP))\\s+-->" data)]
         ;(println data " " start " " finish)
@@ -247,7 +106,7 @@
               (and (= start 0) (> finish 0))
               (let [[directive, next-data] (parse-tmpl-directive data)]
                 (recur (conj result directive) next-data))
-              t (assert false "Oops!")))
+              :else (assert false "Oops!")))
       result)))
 
 
@@ -258,20 +117,6 @@
 (defn w []
   (let [tmpl "<html><head><!-- this is foo --></head><body><!-- TMPL_VAR hello --></body></html>"]
     (parse-tmpl tmpl)))
-
-(defn vv []
-  (loop [compiled-output nil
-         context (gensym)
-         tokens (w)]
-    (if tokens
-      (let [[key value] (first tokens)]
-        (println "compiled-output:" compiled-output "key:" key ", value:" value)
-        (cond (= key :text)
-          (recur (conj compiled-output `(println ~value)) context (next tokens))
-          (= key :tmpl-var)
-          (recur (conj compiled-output `(get ~context ~value)) context (next tokens))
-          :else (recur compiled-output context (next tokens))))
-      `(fn [~context] ~@(reverse compiled-output)))))
 
 (defstruct context :compiled-output :context :context-symbol)
 
@@ -301,12 +146,13 @@
         old-struct (peek context)]
     (conj (pop context) (assoc old-struct :compiled-output (conj ele value)))))
 
-(defn vvv []
+(defn compile-tmpl [init-tokens]
+  "Compiled tokenized intermediate form into executable Clojure code"
   (loop [context (create-context-stack)
-         tokens (v)]
+         tokens init-tokens]
     (if tokens
       (let [[key value] (first tokens)]
-        (println "compiled-output:" (peek-compiled-output context) "key:" key ", value:" value)
+        ;(println "compiled-output:" (peek-compiled-output context) "key:" key ", value:" value)
         (cond (= key :text)
               (recur (push-compiled-output context `(println ~value)) (next tokens))
               (= key :tmpl-var)
@@ -322,3 +168,5 @@
               :else (recur context (next tokens))))
       `(fn [~(peek-context context)] ~@(peek-compiled-output context)))))
 
+(defn vv []
+  (compile-tmpl (v)))
