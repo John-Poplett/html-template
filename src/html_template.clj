@@ -1,79 +1,5 @@
-(ns html-template.core
-  (:use clojure.pprint))
-
-;(ns html-template.core
- ; (:use clojure.set clojure.test clojure.pprint))
-
-;; <table border=1>
-;;   <!-- TMPL_LOOP rows -->
-;;     <tr>
-;;       <!-- TMPL_LOOP cols -->
-;;         <!-- TMPL_IF colorful-style -->
-;;           <td align="right" bgcolor="pink"><!-- TMPL_VAR content --></td>
-;;         <!-- TMPL_ELSE -->
-;;           <td align="right" ><!-- TMPL_VAR content --></td>
-;;         <!-- /TMPL_IF -->
-;;       <!-- /TMPL_LOOP -->
-;;     </tr>
-;;   <!-- /TMPL_LOOP -->
-;; </table>
-
-(declare parse-template)
-
-(defn sample-parse []
-  (parse-template
-"<table border=1>
-  <!-- TMPL_LOOP rows -->
-    <tr>
-      <!-- TMPL_LOOP cols -->
-        <!-- TMPL_IF colorful-style -->
-          <td align=\"right\" bgcolor=\"pink\"><!-- TMPL_VAR content --></td>
-        <!-- TMPL_ELSE -->
-          <td align=\"right\" ><!-- TMPL_VAR content --></td>
-        <!-- /TMPL_IF -->
-      <!-- /TMPL_LOOP -->
-    </tr>
-  <!-- /TMPL_LOOP -->
-</table>"))
-
-;; (let* ((rows (loop for i below 49 by 7
-;;                    collect (list :cols
-;;                                  (loop for j from i below (+ i 7)
-;;                                        for string = (format nil "~R" j)
-;;                                        collect (list :content string
-;;                                                      :colorful-style (oddp j))))))
-;;        (values (list :rows rows)))
-;;   (fill-and-print-template #p"/tmp/foo.tmpl" values))
-
-(defn- range-by-old [start end step]
-  (reverse (reduce (fn [x y] (if (or (= 0 y) (= 0 (mod y step))) (conj x y) x)) nil (range start end))))
-
-(defn- range-by [start end step]
-  (remove #(and (> % 0) (not= 0 (mod % step))) (range start end)))
-
-(defn- build-row [start end]
-  `{ :cols ~(vec (map (fn [n] `{ :content ~(cl-format nil "~R" n) :colorful-style ~(odd? n)}) (range start end)))})
-
-(defn build-rows [start end]
-  `{ :rows ~(vec (map (fn [row-start] (build-row row-start (+ row-start 7))) (range-by start end 7)))})
-
-(defn template-code [values]
-  (println "<table border=1>")
-  (doseq [rows (get values :rows)]
-    (println "<tr>")
-    (doseq [cols (get rows :cols)]
-      (if (get cols :colorful-style)
-        (do 
-          (print "          <td align=\"right\" bgcolor=\"pink\">")
-          (print (get cols :content))
-          (println "</td>"))
-        (do
-          (print "          <td align=\"right\" >")
-          (print (get cols :content))
-          (println "</td>"))))
-    (println "</tr>"))
-  (println "</table>"))
-  
+(ns html-template)
+    
 (defn- first-match [m]
   (if (coll? m) (first m) m))
 
@@ -161,54 +87,37 @@
               :else (assert false "Oops!")))
       result)))
 
-
-(defn v []
-  (let [tmpl "<html><head><!-- this is foo --></head><body>
-<!-- TMPL_LOOP foo -->
-<!-- TMPL_IF hello -->
-<p><!-- TMPL_VAR hello --></p>
-<!-- TMPL_ELSE -->
-<p>hello world!</p>
-<!-- /TMPL_IF -->
-<!-- /TMPL_LOOP -->
-</body></html>"]
-    (parse-template tmpl)))
-
-(defn w []
-  (let [tmpl "<html><head><!-- this is foo --></head><body><!-- TMPL_VAR hello --></body></html>"]
-    (parse-template tmpl)))
-
 (defstruct context :compiled-output :context :context-symbol)
 
-(defn create-context-stack []
+(defn- create-context-stack []
   [(struct context [] (gensym) nil)])
 
 (declare peek-context)
 
-(defn create-code-frame [ctx context-symbol]
+(defn- create-code-frame [ctx context-symbol]
   "Like push-context-stack only preserves \"context\" from previous
 stack position."
   (conj ctx (struct context [] (peek-context ctx) context-symbol)))
   
-(defn push-context-stack [ctx context-symbol]
+(defn- push-context-stack [ctx context-symbol]
   (conj ctx (struct context [] (gensym) context-symbol)))
 
-(defn pop-context-stack [context]
+(defn- pop-context-stack [context]
   (pop context))
 
-(defn peek-compiled-output [context]
+(defn- peek-compiled-output [context]
   (:compiled-output (peek context)))
 
-(defn peek-context [context]
+(defn- peek-context [context]
   (:context (peek context)))
 
-(defn peek-previous-context [context]
+(defn- peek-previous-context [context]
   (peek-context (pop-context-stack context)))
 
-(defn peek-context-symbol [context]
+(defn- peek-context-symbol [context]
   (:context-symbol (peek context)))
 
-(defn push-compiled-output [context value]
+(defn- push-compiled-output [context value]
   (let [ele (peek-compiled-output context)
         old-struct (peek context)]
     (conj (pop context) (assoc old-struct :compiled-output (conj ele value)))))
@@ -260,22 +169,13 @@ stack position."
           (eval compiled-output)
           compiled-output))))))
 
-(defn sample-output []
-  ((compile-template (sample-parse)) (build-rows 0 49)))
-
 (defn parse-and-compile [template]
+  "Compile template to Clojure code."
   (compile-template (parse-template template)))
 
 (defn print-template [template context]
+  "Parse, compile and evaluate the compiled template with the given context."
   ((parse-and-compile template) context))
 
-(defn vv []
-  (compile-template (v) {:eval false}))
 
-(defn foo
-  ([message] (foo message {}))
-  ([message {evaluate? :eval, :or { evaluate? true }}]
-     (if evaluate?
-       (println message))
-     (println evaluate?)))
 
