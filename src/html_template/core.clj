@@ -18,10 +18,10 @@
 ;;   <!-- /TMPL_LOOP -->
 ;; </table>
 
-(declare parse-tmpl)
+(declare parse-template)
 
 (defn sample-parse []
-  (parse-tmpl
+  (parse-template
 "<table border=1>
   <!-- TMPL_LOOP rows -->
     <tr>
@@ -45,13 +45,13 @@
 ;;        (values (list :rows rows)))
 ;;   (fill-and-print-template #p"/tmp/foo.tmpl" values))
 
-(defn range-by-old [start end step]
+(defn- range-by-old [start end step]
   (reverse (reduce (fn [x y] (if (or (= 0 y) (= 0 (mod y step))) (conj x y) x)) nil (range start end))))
 
-(defn range-by [start end step]
+(defn- range-by [start end step]
   (remove #(and (> % 0) (not= 0 (mod % step))) (range start end)))
 
-(defn build-row [start end]
+(defn- build-row [start end]
   `{ :cols ~(vec (map (fn [n] `{ :content ~(cl-format nil "~R" n) :colorful-style ~(odd? n)}) (range start end)))})
 
 (defn build-rows [start end]
@@ -74,36 +74,36 @@
     (println "</tr>"))
   (println "</table>"))
   
-(defn first-match [m]
+(defn- first-match [m]
   (if (coll? m) (first m) m))
 
-(defn match [regex text]
+(defn- match [regex text]
   (let [m (first-match (re-find (re-pattern regex) text))]
     (if (nil? m)
       [0 0]
       (let [ind (.indexOf text m) len (.length m)]
         [ind (+ ind len)]))))
 
-(defn parse-tmpl-var [data]
+(defn- parse-tmpl-var [data]
   (let [result (re-find (re-pattern "^<!--\\s+TMPL_VAR\\s+([a-z][a-z0-9]*)\\s+-->") data)]
     (if result
       [ [ :tmpl-var (keyword (second result)) ], (subs data (count (first result))) ]
       nil)))
   
-(defn parse-tmpl-loop [data]
+(defn- parse-tmpl-loop [data]
   (let [result (re-find (re-pattern "^<!--\\s+TMPL_LOOP\\s+([a-z][a-z0-9]*)\\s+-->") data)]
     (if result
       [ [ :tmpl-loop (keyword (second result)) ], (subs data (count (first result))) ]
       nil)))
   
-(defn parse-tmpl-end-loop [data]
+(defn- parse-tmpl-end-loop [data]
   (let [result (re-find (re-pattern "^<!--\\s+/TMPL_LOOP\\s+-->") data)]
     ;(println parse-tmpl-end-loop ": " data " -> " result)
     (if result
       [ [ :tmpl-end-loop nil ], (subs data (count result)) ]
       nil)))
   
-(defn parse-tmpl-if [data]
+(defn- parse-tmpl-if [data]
   (let [result (re-find (re-pattern "^<!--\\s+TMPL_IF\\s+([a-z][a-z\\-0-9]*)\\s+-->") data)]
     (if result
       [ [ :tmpl-if (keyword (second result)) ], (subs data (count (first result))) ]
@@ -116,14 +116,14 @@
       [ [ :tmpl-else nil ], (subs data (count result)) ]
       nil)))
   
-(defn parse-tmpl-end-if [data]
+(defn- parse-tmpl-end-if [data]
   (let [result (re-find (re-pattern "^<!--\\s+/TMPL_IF\\s+-->") data)]
     ;(println parse-tmpl-end-loop ": " data " -> " result)
     (if result
       [ [ :tmpl-end-if nil ], (subs data (count result)) ]
       nil)))
   
-(defn parse-tmpl-directive [data]
+(defn- parse-tmpl-directive [data]
   (loop [directive-parsers [parse-tmpl-var parse-tmpl-loop parse-tmpl-end-loop parse-tmpl-if parse-tmpl-else parse-tmpl-end-if]]
     (assert directive-parsers) ; should never run out of parsers
     (let [result ((first directive-parsers) data)]
@@ -131,7 +131,18 @@
         (recur (rest directive-parsers))
         result))))
 
-(defn parse-tmpl [init-template-data]
+(defn- ^String triml-newline
+  "Removes newlines from the left side of string."
+  [^CharSequence s]
+  (loop [index (int 0)]
+    (if (= (.length s) index)
+      ""
+      (let [ch (.charAt s index)]
+        (if (or (= ch \newline) (= ch \return))
+          (recur (inc index))
+          (.. s (subSequence index (.length s)) toString))))))
+
+(defn parse-template [init-template-data]
   "Parse template data into a tokenized intermediate form."
   (loop [result []
          data init-template-data]
@@ -146,7 +157,7 @@
                      "")
               (and (= start 0) (> finish 0))
               (let [[directive, next-data] (parse-tmpl-directive data)]
-                (recur (conj result directive) next-data))
+                (recur (conj result directive) (triml-newline next-data)))
               :else (assert false "Oops!")))
       result)))
 
@@ -161,11 +172,11 @@
 <!-- /TMPL_IF -->
 <!-- /TMPL_LOOP -->
 </body></html>"]
-    (parse-tmpl tmpl)))
+    (parse-template tmpl)))
 
 (defn w []
   (let [tmpl "<html><head><!-- this is foo --></head><body><!-- TMPL_VAR hello --></body></html>"]
-    (parse-tmpl tmpl)))
+    (parse-template tmpl)))
 
 (defstruct context :compiled-output :context :context-symbol)
 
@@ -202,7 +213,9 @@ stack position."
         old-struct (peek context)]
     (conj (pop context) (assoc old-struct :compiled-output (conj ele value)))))
 
-(defn compile-tmpl [init-tokens]
+(defn compile-template
+  ([init-tokens] (compile-template init-tokens {}))
+  ([init-tokens {evaluate? :eval, :or { evaluate? true }}]
   "Compiled tokenized intermediate form into executable Clojure code"
   (loop [context (create-context-stack)
          tokens init-tokens]
@@ -242,7 +255,27 @@ stack position."
                                        ~@(peek-compiled-output context))]
                 (recur (push-compiled-output (pop-context-stack context) compiled-output) (next tokens)))
               :else (recur context (next tokens))))
-      `(fn [~(peek-context context)] ~@(peek-compiled-output context)))))
+      (let [compiled-output `(fn [~(peek-context context)] ~@(peek-compiled-output context))]
+        (if evaluate?
+          (eval compiled-output)
+          compiled-output))))))
+
+(defn sample-output []
+  ((compile-template (sample-parse)) (build-rows 0 49)))
+
+(defn parse-and-compile [template]
+  (compile-template (parse-template template)))
+
+(defn print-template [template context]
+  ((parse-and-compile template) context))
 
 (defn vv []
-  (compile-tmpl (v)))
+  (compile-template (v) {:eval false}))
+
+(defn foo
+  ([message] (foo message {}))
+  ([message {evaluate? :eval, :or { evaluate? true }}]
+     (if evaluate?
+       (println message))
+     (println evaluate?)))
+

@@ -1,13 +1,100 @@
-# html-template
+#+TITLE: HTML-TEMPLATE for Clojure
+#+AUTHOR: John Poplett
+#+EMAIL: john.poplett < AT > acm.org
+* Abstract
+A templating system in Clojure modeled on [[http://weitz.de/html-template/][HTML-TEMPLATE]] for Common
+Lisp, allowing for the separation of code from layout and dynamic
+generation of HTML pages.
 
-FIXME: write description
+What Wordstar's MailMerge was to daisy-wheel printers, template
+systems are to web sites.
+* Usage
+** Tags
+HTML-TEMPLATE for Clojure implements the following tags:
 
-## Usage
++ =TMPL_VAR=
++ =TMPL_LOOP=
++ =/TMPL_LOOP=
++ =TMPL_IF=
++ =TMPL_ELSE=
++ =/TMPL_IF=
 
-FIXME: write
+** Templates
+A template file consists of HTML markup interspersed with HTML-TEMPLATE
+directives: tags embedded in HTML comments, e.g.:
 
-## License
+#+BEGIN_SRC html
+<!-- TMPL_VAR hello -->
+#+END_SRC
 
-Copyright (C) 2011 FIXME
+Dr. Weitz provides this example in his documentation for HTML-TEMPLATE
+for Common Lisp:
 
-Distributed under the Eclipse Public License, the same as Clojure.
+#+BEGIN_SRC html
+<table border=1>
+  <!-- TMPL_LOOP rows -->
+  <tr>
+     <!-- TMPL_LOOP cols -->
+     <!-- TMPL_IF colorful-style -->
+     <td align="right" bgcolor="pink"><!-- TMPL_VAR content --></td>
+     <!-- TMPL_ELSE -->
+     <td align="right" ><!-- TMPL_VAR content --></td>
+     <!-- /TMPL_IF -->
+     <!-- /TMPL_LOOP -->
+ </tr>
+ <!-- /TMPL_LOOP -->
+</table>
+#+END_SRC
+
+This example will also compile on HTML-TEMPLATE for Clojure. 
+
+HTML-TEMPLATE compiles it into Clojure code, functionally
+equivalent to the following:
+
+#+BEGIN_SRC clojure
+(defn template-code [values]
+  (println "<table border=1>")
+  (doseq [rows (get values :rows)]
+    (println "<tr>")
+    (doseq [cols (get rows :cols)]
+      (if (get cols :colorful-style)
+        (do 
+          (print "          <td align=\"right\" bgcolor=\"pink\">")
+          (print (get cols :content))
+          (println "</td>"))
+        (do
+          (print "          <td align=\"right\" >")
+          (print (get cols :content))
+          (println "</td>"))))
+    (println "</tr>"))
+  (println "</table>"))
+#+END_SRC
+
+** Functions
+*** =parse-and-compile=
+Compile a template into an anonymous function that takes a single
+argument, the hashmap of data values used to generate output from the
+compiled template.
+
+For example:
+
+=(parse-and-compile "<html><body><!-- TMPL_VAR hello --></body></html>")=
+
+*** =print-template=
+
+Parse, compile and apply a template to a provided context. E.g.:
+
+=(print-template "<html><body><!-- TMPL_VAR hello --></body></html>" { :hello "hello world!" })=
+
+produces the result:
+
+=<html><body>hello world!</body></html>=
+
+* License
+Copyright (c) 2011 John H. Poplett. All rights reserved.
+
+Distributed under the MIT license.
+
+* Acknowledgements
+Thanks to Dr. Edmund Weitz for the original Common Lisp
+implementation.
