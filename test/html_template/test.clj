@@ -2,32 +2,13 @@
   (:use [html-template])
   (:use [clojure.test]))
 
-(defn w []
-  (let [tmpl "<html><head><!-- this is foo --></head><body><!-- TMPL_VAR hello --></body></html>"]
-    (parse-template tmpl)))
-
-(defn v []
-  (let [tmpl "<html><head><!-- this is foo --></head><body>
-<!-- TMPL_LOOP foo -->
-<!-- TMPL_IF hello -->
-<p><!-- TMPL_VAR hello --></p>
-<!-- TMPL_ELSE -->
-<p>hello world!</p>
-<!-- /TMPL_IF -->
-<!-- /TMPL_LOOP -->
-</body></html>"]
-    (parse-template tmpl)))
-
-(defn vv []
-  (compile-template (v) {:eval false}))
-
 (deftest tmpl-noop
   (let [tmpl "<html><body><!-- this is foo --></body></html>"
         context { :hello "hello world!" }
         expected-result tmpl]
     (is (= (with-out-str (print-template tmpl context)) expected-result))))
 
-(deftest tmpl-var
+(deftest tmpl-var-test
   (let [tmpl "<html><body><!-- TMPL_VAR hello --></body></html>"
         context { :hello "hello world!" }
         expected-result "<html><body>hello world!</body></html>"]
@@ -58,4 +39,28 @@
                     [ {} "<html><body>hi, shirley!</body></html>"]]]
     (doseq [pair test-pairs]
       (is (= (with-out-str (print-template tmpl (first pair))) (second pair))))))
+
+(def sample-tmpl
+"<table border=1>
+  <!-- TMPL_LOOP rows -->
+    <tr>
+      <!-- TMPL_LOOP cols -->
+        <!-- TMPL_IF colorful-style -->
+          <td align=\"right\" bgcolor=\"pink\"><!-- TMPL_VAR content --></td>
+        <!-- TMPL_ELSE -->
+          <td align=\"right\" ><!-- TMPL_VAR content --></td>
+        <!-- /TMPL_IF -->
+      <!-- /TMPL_LOOP -->
+    </tr>
+  <!-- /TMPL_LOOP -->
+</table>")
+
+(deftest sample-parse-test
+  (let [result (parse-template sample-tmpl)]
+    (is (>= (.indexOf ((first result) 1) "<table") 0))
+    (is (= ((second result) 0) :tmpl-loop))
+    (is (= ((second result) 1) :rows))
+    (is (= ((last (butlast result)) 0) :tmpl-end-loop))
+    (is (>= (.indexOf ((last result) 1) "</table>") 0))))
+
 

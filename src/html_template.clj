@@ -1,69 +1,135 @@
-(ns html-template)
-    
-(defn- first-match [m]
-  (if (coll? m) (first m) m))
+(ns html-template
+  [:use name.choi.joshua.fnparse clojure.algo.monads])
 
-(defn- match [regex text]
-  "Return the startr index of the match, length of the match and the match itself."
-  (let [r (re-find (re-pattern regex) text)
-        m (first-match r)]
-    (if (nil? m)
-      [0 0 nil]
-      (let [ind (.indexOf text m) len (.length m)]
-        [ind (+ ind len) r]))))
+(defn run-p
+  [parser input]
+  (let [result (rule-match parser
+                           #(prn "fail:" %&)
+                           #(prn "incomplete:" %&)
+                           {:remainder input})]
+    (cond (nil? result) nil
+          (vector? result) (apply str result)
+          :else (str result))))
 
-(defn- parse-tmpl-directive [data result tag identifier]
-  "Create tokenized representation of HTML-TEMPLATE tags. The regex expression
-returns two or three values: the complete match, the tag name and an optional
-identifier. The function uses a map lookup to convert the tag name into its
-tokenized representation, .e.g. the string \"<!-- TMPL_VAR hello -->\" is
-converted to the vector [ :tmpl-var :hello ]."
-  (if result
-    (let [value ({ "TMPL_VAR" [ :tmpl-var (keyword identifier) ]
-                   "TMPL_IF" [ :tmpl-if (keyword identifier) ]
-                   "TMPL_ELSE" [ :tmpl-else nil ]
-                   "/TMPL_IF" [ :tmpl-end-if nil ]
-                   "TMPL_UNLESS" [ :tmpl-unless (keyword identifier) ]
-                   "/TMPL_UNLESS" [ :tmpl-end-unless nil ]
-                   "TMPL_LOOP" [ :tmpl-loop (keyword identifier) ]
-                   "/TMPL_LOOP" [ :tmpl-end-loop nil ] } (.toUpperCase tag)) ]
-      [ value (subs data (count result)) ])
-    nil))
+(defn- test-set [& args]
+  (set (mapcat (fn [value]
+                 (cond (sequential? value)
+                       (map char (range (int (first value)) (inc (int (second value)))))
+                       (char? value) [value])) args)))
 
-(defn- ^String triml-newline
-  "Removes newlines from the left side of string."
-  [^CharSequence s]
-  (loop [index (int 0)]
-    (if (= (.length s) index)
-      ""
-      (let [ch (.charAt s index)]
-        (if (or (= ch \newline) (= ch \return))
-          (recur (inc index))
-          (.. s (subSequence index (.length s)) toString))))))
+(def lower-case (term #(contains? (test-set [\a \z]) %)))
 
-(comment
-  "Pattern to identify all valid instances of an HTML-TEMPLATE tag. It returns the whole matching string,
-the tag and optionally an identifier.")
-(def tmpl-pattern  "<!--\\s+((?i)/?TMPL_(?:IF|ELSE|LOOP|UNLESS|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->")
+(def lower-case-plus-hyphen (term #(contains? (test-set [\a \z] \-) %)))
 
-(defn parse-template [init-template-data]
-  "Parse template data into a tokenized intermediate form."
-  (loop [result []
-         data init-template-data]
-    (if (> (count data) 0)
-      (let [[start finish [match-result match-tag match-identifier]] (match tmpl-pattern data)]
-        ;(println data " " start " " finish)
-        (cond (> start 0)    ; collect plain text up to tmpl directive
-              (recur (conj result [ :text (subs data 0 start) ])
-                     (subs data start))
-              (and (= start 0) (= finish 0)) ; remainder is plain text
-              (recur (conj result [ :text data ])
-                     "")
-              (and (= start 0) (> finish 0))
-              (let [[directive, next-data] (parse-tmpl-directive data match-result match-tag match-identifier)]
-                (recur (conj result directive) (triml-newline next-data)))
-              :else (assert false "Oops!")))
-      result)))
+(def tmpl-identifier (semantics (conc lower-case (rep* lower-case-plus-hyphen))
+                                (fn [result] (apply str (flatten result)))))
+
+(def comment-start (lit-conc-seq "<!--"))
+
+(def comment-end (lit-conc-seq "-->"))
+
+(def ws (rep+ (lit-alt-seq [\space \tab \newline])))
+
+(defn- lit-ic
+  "Like lit only is case insensitive."
+  [literal-token]
+  (term (fn [char] (= (java.lang.Character/toUpperCase literal-token) (java.lang.Character/toUpperCase char)))))
+
+(defn- tmpl-expr-with-parameter [tag key]
+  (complex [_ comment-start
+            _ ws
+            _ (lit-conc-seq tag lit-ic)
+            _ ws
+            identifier tmpl-identifier
+            _ ws
+            _ comment-end
+            _ (rep* (lit \newline))]
+           [key (keyword identifier)]))
+
+(defn- tmpl-expr-no-parameter [tag key]
+  (complex [_ comment-start
+            _ ws
+            _ (lit-conc-seq tag lit-ic)
+            _ ws
+            _ comment-end
+            _ (rep* (lit \newline))]
+           [key nil]))
+
+(declare stmts)
+
+(def loop-start (tmpl-expr-with-parameter "TMPL_LOOP" :tmpl-loop))
+(def loop-end (tmpl-expr-no-parameter "/TMPL_LOOP" :tmpl-end-loop))
+(def loop-stmt
+  (complex [loop-start-value loop-start
+            values stmts
+            loop-end-value loop-end]
+           [loop-start-value values loop-end-value]))
+
+(def if-start (tmpl-expr-with-parameter "TMPL_IF" :tmpl-if))
+(def if-end (tmpl-expr-no-parameter "/TMPL_IF" :tmpl-end-if))
+(def else (tmpl-expr-no-parameter "TMPL_ELSE" :tmpl-else))
+(def if-simple-stmt
+  (complex [if-start-value if-start
+            values stmts
+            if-end-value if-end]
+           [if-start-value values if-end-value]))
+(def if-else-stmt
+  (complex [if-start-value if-start
+            if-values stmts
+            else-value else
+            else-values stmts
+            if-end-value if-end]
+           [if-start-value if-values else-value else-values if-end-value]))
+(def if-stmt (alt if-simple-stmt if-else-stmt))
+
+(def unless-start (tmpl-expr-with-parameter "TMPL_UNLESS" :tmpl-unless))
+(def unless-end (tmpl-expr-no-parameter "/TMPL_UNLESS" :tmpl-end-unless))
+(def unless-simple-stmt
+  (complex [unless-start-value unless-start
+            values stmts
+            unless-end-value unless-end]
+           [unless-start-value values unless-end-value]))
+(def unless-else-stmt
+  (complex [unless-start-value unless-start
+            unless-values stmts
+            else-value  else
+            else-values stmts
+            unless-end-value unless-end]
+           [unless-start-value unless-values else-value else-values unless-end-value]))
+(def unless-stmt (alt unless-simple-stmt unless-else-stmt))
+
+(def tmpl-var (tmpl-expr-with-parameter "TMPL_VAR" :tmpl-var))
+
+(def tmpl-expr (alt loop-start loop-end if-start if-end else unless-start unless-end tmpl-var))
+
+(def text
+  (complex [value (rep+ (except anything tmpl-expr))]
+           [ :text (apply str (flatten value)) ]))
+
+(def stmt
+  (complex [value (alt text tmpl-var if-stmt loop-stmt unless-stmt)]
+           value))
+
+(def stmts
+  (complex [values (rep+ stmt)]
+            values ))
+
+(defn- flatter [data]
+  "Partially flatten results. A vector of vectors is allowed but further nesting is not."
+  (letfn [(work-horse [data acc]
+            (if data
+              (cond (and (vector? (first data)) (vector? (first (first data))))
+                    (work-horse (next data) (work-horse (first data) acc))
+                    :else
+                    (work-horse (next data) (conj acc (first data))))
+              acc))]
+    (work-horse data [])))
+
+(defn- call-flatter []
+   (flatter [[:text "xxx"] [[:tmpl-loop "foo"] [[[:tmpl-unless "hello"] [[:tmpl-var "hello"]] [:tmpl-end-unless nil]]] [:tmpl-end-loop nil]]]))
+
+(defn parse-template [data]
+  (flatter (rule-match stmts prn prn {:remainder data})))
 
 (defstruct context :compiled-output :context :context-symbol)
 
@@ -76,7 +142,7 @@ the tag and optionally an identifier.")
   "Like push-context-stack only preserves \"context\" from previous
 stack position."
   (conj ctx (struct context [] (peek-context ctx) context-symbol)))
-  
+
 (defn- push-context-stack [ctx context-symbol]
   (conj ctx (struct context [] (gensym) context-symbol)))
 
