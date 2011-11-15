@@ -33,3 +33,10 @@
         expected-result "<html><body>hello world!</body></html>"]
     (is (= (with-out-str (print-template tmpl context)) expected-result))))
 
+(deftest tmpl-if
+  (let [tmpl "<html><body><!-- TMPL_IF foo --><!-- TMPL_VAR foo --><!-- TMPL_ELSE -->hi, shirley!<!-- /TMPL_IF --></body></html>"
+        test-pairs [[ { :foo "hello world!" } "<html><body>hello world!</body></html>"]
+                    [ {} "<html><body>hi, shirley!</body></html>"]]]
+    (doseq [pair test-pairs]
+      (is (= (with-out-str (print-template tmpl (first pair))) (second pair))))))
+

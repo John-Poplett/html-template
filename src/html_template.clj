@@ -10,52 +10,22 @@
       (let [ind (.indexOf text m) len (.length m)]
         [ind (+ ind len)]))))
 
-(defn- parse-tmpl-var [data]
-  (let [result (re-find (re-pattern "^<!--\\s+TMPL_VAR\\s+([a-z][a-z0-9]*)\\s+-->") data)]
-    (if result
-      [ [ :tmpl-var (keyword (second result)) ], (subs data (count (first result))) ]
-      nil)))
-  
-(defn- parse-tmpl-loop [data]
-  (let [result (re-find (re-pattern "^<!--\\s+TMPL_LOOP\\s+([a-z][a-z0-9]*)\\s+-->") data)]
-    (if result
-      [ [ :tmpl-loop (keyword (second result)) ], (subs data (count (first result))) ]
-      nil)))
-  
-(defn- parse-tmpl-end-loop [data]
-  (let [result (re-find (re-pattern "^<!--\\s+/TMPL_LOOP\\s+-->") data)]
-    ;(println parse-tmpl-end-loop ": " data " -> " result)
-    (if result
-      [ [ :tmpl-end-loop nil ], (subs data (count result)) ]
-      nil)))
-  
-(defn- parse-tmpl-if [data]
-  (let [result (re-find (re-pattern "^<!--\\s+TMPL_IF\\s+([a-z][a-z\\-0-9]*)\\s+-->") data)]
-    (if result
-      [ [ :tmpl-if (keyword (second result)) ], (subs data (count (first result))) ]
-      nil)))
-  
-(defn parse-tmpl-else [data]
-  (let [result (re-find (re-pattern "^<!--\\s+TMPL_ELSE\\s+-->") data)]
-    ;(println parse-tmpl-end-loop ": " data " -> " result)
-    (if result
-      [ [ :tmpl-else nil ], (subs data (count result)) ]
-      nil)))
-  
-(defn- parse-tmpl-end-if [data]
-  (let [result (re-find (re-pattern "^<!--\\s+/TMPL_IF\\s+-->") data)]
-    ;(println parse-tmpl-end-loop ": " data " -> " result)
-    (if result
-      [ [ :tmpl-end-if nil ], (subs data (count result)) ]
-      nil)))
-  
 (defn- parse-tmpl-directive [data]
-  (loop [directive-parsers [parse-tmpl-var parse-tmpl-loop parse-tmpl-end-loop parse-tmpl-if parse-tmpl-else parse-tmpl-end-if]]
-    (assert directive-parsers) ; should never run out of parsers
-    (let [result ((first directive-parsers) data)]
-      (if (nil? result)
-        (recur (rest directive-parsers))
-        result))))
+  "Create tokenized representation of HTML-TEMPLATE tags. The regex expression
+returns two or three values: the complete match, the tag name and an optional
+identifier. The function uses a map lookup to convert the tag name into its
+tokenized representation, .e.g. the string \"<!-- TMPL_VAR hello -->\" is
+converted to the vector [ :tmpl-var :hello ]."
+  (let [[result tag identifier] (re-find (re-pattern "^<!--\\s+(/?TMPL_(?:IF|ELSE|LOOP|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->") data)]
+    (if result
+      (let [value ({ "TMPL_VAR" [ :tmpl-var (keyword identifier) ]
+                     "TMPL_IF" [ :tmpl-if (keyword identifier) ]
+                     "TMPL_ELSE" [ :tmpl-else nil ]
+                     "/TMPL_IF" [ :tmpl-end-if nil ]
+                     "TMPL_LOOP" [ :tmpl-loop (keyword identifier) ]
+                     "/TMPL_LOOP" [ :tmpl-end-loop nil ] } tag) ]
+        [ value (subs data (count result)) ])
+      nil)))
 
 (defn- ^String triml-newline
   "Removes newlines from the left side of string."
@@ -125,7 +95,7 @@ stack position."
 (defn compile-template
   ([init-tokens] (compile-template init-tokens {}))
   ([init-tokens {evaluate? :eval, :or { evaluate? true }}]
-  "Compiled tokenized intermediate form into executable Clojure code"
+  "Compile tokenized, intermediate form into executable Clojure code"
   (loop [context (create-context-stack)
          tokens init-tokens]
     (if tokens
