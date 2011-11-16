@@ -18,6 +18,8 @@ HTML-TEMPLATE for Clojure implements the following tags:
 + =TMPL_IF=
 + =TMPL_ELSE=
 + =/TMPL_IF=
++ =TMPL_UNLESS=
++ =/TMPL_UNLESS=
 
 ** Templates
 A template file consists of HTML markup interspersed with HTML-TEMPLATE
@@ -48,8 +50,8 @@ for Common Lisp:
 
 This example will also compile on HTML-TEMPLATE for Clojure. 
 
-HTML-TEMPLATE compiles it into Clojure code, functionally
-equivalent to the following:
+HTML-TEMPLATE compiles the foregoing example into Clojure code,
+functionally equivalent to the following:
 
 #+BEGIN_SRC clojure
 (defn template-code [values]
@@ -71,7 +73,7 @@ equivalent to the following:
 #+END_SRC
 
 ** Functions
-*** =parse-and-compile=
+*** =parse-and-compile [template]=
 Compile a template into an anonymous function that takes a single
 argument, the hashmap of data values used to generate output from the
 compiled template.
@@ -80,7 +82,7 @@ For example:
 
 =(parse-and-compile "<html><body><!-- TMPL_VAR hello --></body></html>")=
 
-*** =print-template=
+*** =print-template [template context]=
 
 Parse, compile and apply a template to a provided context. E.g.:
 
@@ -89,6 +91,14 @@ Parse, compile and apply a template to a provided context. E.g.:
 produces the result:
 
 =<html><body>hello world!</body></html>=
+
+To direct the output to a string, you can enshroud print-template with the
+=with-out-str= macro:
+
+#+BEGIN_SRC lisp
+(with-out_str
+  (print-template "<html><body><!-- TMPL_VAR hello --></body></html>" { :hello "hello world!" }))
+#+END_SRC
 
 * License
 Copyright (c) 2011 John H. Poplett. All rights reserved.

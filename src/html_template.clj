@@ -16,12 +16,14 @@ returns two or three values: the complete match, the tag name and an optional
 identifier. The function uses a map lookup to convert the tag name into its
 tokenized representation, .e.g. the string \"<!-- TMPL_VAR hello -->\" is
 converted to the vector [ :tmpl-var :hello ]."
-  (let [[result tag identifier] (re-find (re-pattern "^<!--\\s+(/?TMPL_(?:IF|ELSE|LOOP|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->") data)]
+  (let [[result tag identifier] (re-find (re-pattern "^<!--\\s+(/?TMPL_(?:IF|ELSE|LOOP|UNLESS|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->") data)]
     (if result
       (let [value ({ "TMPL_VAR" [ :tmpl-var (keyword identifier) ]
                      "TMPL_IF" [ :tmpl-if (keyword identifier) ]
                      "TMPL_ELSE" [ :tmpl-else nil ]
                      "/TMPL_IF" [ :tmpl-end-if nil ]
+                     "TMPL_UNLESS" [ :tmpl-unless (keyword identifier) ]
+                     "/TMPL_UNLESS" [ :tmpl-end-unless nil ]
                      "TMPL_LOOP" [ :tmpl-loop (keyword identifier) ]
                      "/TMPL_LOOP" [ :tmpl-end-loop nil ] } tag) ]
         [ value (subs data (count result)) ])
@@ -43,7 +45,7 @@ converted to the vector [ :tmpl-var :hello ]."
   (loop [result []
          data init-template-data]
     (if (> (count data) 0)
-      (let [[start, finish] (match "<!--\\s+(TMPL_(ELSE|((IF|VAR|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|LOOP))\\s+-->" data)]
+      (let [[start, finish] (match "<!--\\s+(TMPL_(ELSE|((IF|VAR|UNLESS|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|UNLESS|LOOP))\\s+-->" data)]
         ;(println data " " start " " finish)
         (cond (> start 0)    ; collect plain text up to tmpl directive
               (recur (conj result [ :text (subs data 0 start) ])
@@ -113,7 +115,7 @@ stack position."
               (let [context-symbol (peek-context-symbol context)]
                 (cond (= context-symbol :tmpl-else)
                       (let [if-context (pop context)
-                            compiled-output 
+                            compiled-output
                             `(if (get ~(peek-context context) ~(peek-context-symbol if-context))
                                (do
                                  ~@(peek-compiled-output if-context))
@@ -126,6 +128,26 @@ stack position."
                                (do
                                  ~@(peek-compiled-output context)))]
                         (recur (push-compiled-output (pop-context-stack context) compiled-output) (next tokens)))))
+              (= key :tmpl-unless)
+              (recur (create-code-frame context value) (next tokens))
+              (= key :tmpl-end-unless)
+              (let [context-symbol (peek-context-symbol context)]
+                (cond (= context-symbol :tmpl-else)
+                      (let [if-context (pop context)
+                            compiled-output
+                            `(if (not (get ~(peek-context context) ~(peek-context-symbol if-context)))
+                               (do
+                                 ~@(peek-compiled-output if-context))
+                               (do
+                                 ~@(peek-compiled-output context)))]
+                        (recur (push-compiled-output (pop-context-stack if-context) compiled-output) (next tokens)))
+                      :else
+                      (let [compiled-output
+                            '(if (not (get ~(peek-context context) ~(peek-context-symbol context)))
+                               (do
+                                 ~@(peek-compiled-output context)))]
+                        (recur (push-compiled-output (pop-context-stack context) compiled-output) (next tokens)))))
+
               (= key :tmpl-loop)
               (recur (push-context-stack context value) (next tokens))
               (= key :tmpl-end-loop)
@@ -139,13 +161,11 @@ stack position."
           (eval compiled-output)
           compiled-output))))))
 
-(defn parse-and-compile [template]
+(defn parse-and-compile [^CharSequence template]
   "Compile template to Clojure code."
   (compile-template (parse-template template)))
 
-(defn print-template [template context]
+(defn print-template [^CharSequence template context]
   "Parse, compile and evaluate the compiled template with the given context."
   ((parse-and-compile template) context))
-
-
 
