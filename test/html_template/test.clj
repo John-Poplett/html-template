@@ -21,8 +21,20 @@
 (defn vv []
   (compile-template (v) {:eval false}))
 
+(deftest tmpl-noop
+  (let [tmpl "<html><body><!-- this is foo --></body></html>"
+        context { :hello "hello world!" }
+        expected-result tmpl]
+    (is (= (with-out-str (print-template tmpl context)) expected-result))))
+
 (deftest tmpl-var
   (let [tmpl "<html><body><!-- TMPL_VAR hello --></body></html>"
+        context { :hello "hello world!" }
+        expected-result "<html><body>hello world!</body></html>"]
+    (is (= (with-out-str (print-template tmpl context)) expected-result))))
+
+(deftest tmpl-var-mixed-case
+  (let [tmpl "<html><body><!-- Tmpl_Var hello --></body></html>"
         context { :hello "hello world!" }
         expected-result "<html><body>hello world!</body></html>"]
     (is (= (with-out-str (print-template tmpl context)) expected-result))))
@@ -35,6 +47,13 @@
 
 (deftest tmpl-if
   (let [tmpl "<html><body><!-- TMPL_IF foo --><!-- TMPL_VAR foo --><!-- TMPL_ELSE -->hi, shirley!<!-- /TMPL_IF --></body></html>"
+        test-pairs [[ { :foo "hello world!" } "<html><body>hello world!</body></html>"]
+                    [ {} "<html><body>hi, shirley!</body></html>"]]]
+    (doseq [pair test-pairs]
+      (is (= (with-out-str (print-template tmpl (first pair))) (second pair))))))
+
+(deftest tmpl-unless
+  (let [tmpl "<html><body><!-- TMPL_UNLESS foo -->hi, shirley!<!-- TMPL_ELSE --><!-- TMPL_VAR foo --><!-- /TMPL_UNLESS --></body></html>"
         test-pairs [[ { :foo "hello world!" } "<html><body>hello world!</body></html>"]
                     [ {} "<html><body>hi, shirley!</body></html>"]]]
     (doseq [pair test-pairs]

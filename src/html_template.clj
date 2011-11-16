@@ -4,30 +4,31 @@
   (if (coll? m) (first m) m))
 
 (defn- match [regex text]
-  (let [m (first-match (re-find (re-pattern regex) text))]
+  "Return the startr index of the match, length of the match and the match itself."
+  (let [r (re-find (re-pattern regex) text)
+        m (first-match r)]
     (if (nil? m)
-      [0 0]
+      [0 0 nil]
       (let [ind (.indexOf text m) len (.length m)]
-        [ind (+ ind len)]))))
+        [ind (+ ind len) r]))))
 
-(defn- parse-tmpl-directive [data]
+(defn- parse-tmpl-directive [data result tag identifier]
   "Create tokenized representation of HTML-TEMPLATE tags. The regex expression
 returns two or three values: the complete match, the tag name and an optional
 identifier. The function uses a map lookup to convert the tag name into its
 tokenized representation, .e.g. the string \"<!-- TMPL_VAR hello -->\" is
 converted to the vector [ :tmpl-var :hello ]."
-  (let [[result tag identifier] (re-find (re-pattern "^<!--\\s+(/?TMPL_(?:IF|ELSE|LOOP|UNLESS|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->") data)]
-    (if result
-      (let [value ({ "TMPL_VAR" [ :tmpl-var (keyword identifier) ]
-                     "TMPL_IF" [ :tmpl-if (keyword identifier) ]
-                     "TMPL_ELSE" [ :tmpl-else nil ]
-                     "/TMPL_IF" [ :tmpl-end-if nil ]
-                     "TMPL_UNLESS" [ :tmpl-unless (keyword identifier) ]
-                     "/TMPL_UNLESS" [ :tmpl-end-unless nil ]
-                     "TMPL_LOOP" [ :tmpl-loop (keyword identifier) ]
-                     "/TMPL_LOOP" [ :tmpl-end-loop nil ] } tag) ]
-        [ value (subs data (count result)) ])
-      nil)))
+  (if result
+    (let [value ({ "TMPL_VAR" [ :tmpl-var (keyword identifier) ]
+                   "TMPL_IF" [ :tmpl-if (keyword identifier) ]
+                   "TMPL_ELSE" [ :tmpl-else nil ]
+                   "/TMPL_IF" [ :tmpl-end-if nil ]
+                   "TMPL_UNLESS" [ :tmpl-unless (keyword identifier) ]
+                   "/TMPL_UNLESS" [ :tmpl-end-unless nil ]
+                   "TMPL_LOOP" [ :tmpl-loop (keyword identifier) ]
+                   "/TMPL_LOOP" [ :tmpl-end-loop nil ] } (.toUpperCase tag)) ]
+      [ value (subs data (count result)) ])
+    nil))
 
 (defn- ^String triml-newline
   "Removes newlines from the left side of string."
@@ -40,12 +41,17 @@ converted to the vector [ :tmpl-var :hello ]."
           (recur (inc index))
           (.. s (subSequence index (.length s)) toString))))))
 
+(comment
+  "Pattern to identify all valid instances of an HTML-TEMPLATE tag. It returns the whole matching string,
+the tag and optionally an identifier.")
+(def tmpl-pattern  "<!--\\s+((?i)/?TMPL_(?:IF|ELSE|LOOP|UNLESS|VAR))(?:\\s+([a-z][a-z\\-0-9]*))?\\s++-->")
+
 (defn parse-template [init-template-data]
   "Parse template data into a tokenized intermediate form."
   (loop [result []
          data init-template-data]
     (if (> (count data) 0)
-      (let [[start, finish] (match "<!--\\s+(TMPL_(ELSE|((IF|VAR|UNLESS|LOOP)\\s+[a-z][a-z\\-0-9]*))|/TMPL_(IF|UNLESS|LOOP))\\s+-->" data)]
+      (let [[start finish [match-result match-tag match-identifier]] (match tmpl-pattern data)]
         ;(println data " " start " " finish)
         (cond (> start 0)    ; collect plain text up to tmpl directive
               (recur (conj result [ :text (subs data 0 start) ])
@@ -54,7 +60,7 @@ converted to the vector [ :tmpl-var :hello ]."
               (recur (conj result [ :text data ])
                      "")
               (and (= start 0) (> finish 0))
-              (let [[directive, next-data] (parse-tmpl-directive data)]
+              (let [[directive, next-data] (parse-tmpl-directive data match-result match-tag match-identifier)]
                 (recur (conj result directive) (triml-newline next-data)))
               :else (assert false "Oops!")))
       result)))
